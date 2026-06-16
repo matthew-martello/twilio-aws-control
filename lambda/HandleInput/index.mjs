@@ -68,13 +68,14 @@ export const handler = async (event) => {
       return startServer(from);
       break;
 
-    case "2":
-      if (server_allowed.length == 0) {
-        return unauthorized();
-      }
+    //Temporarily disable option two.
+    // case "2":
+    //   if (server_allowed.length == 0) {
+    //     return unauthorized();
+    //   }
 
-      return stopServer(from);
-      break;
+    //   return stopServer(from);
+    //   break;
 
     default:
       return {

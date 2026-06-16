@@ -56,10 +56,12 @@ export const handler = async (event) => {
         >
           <Say voice="${VOICE}">
             To start the server, press one.
-            To stop the server, press two.
           </Say>
         </Gather>
       </Response>`;
+
+    //Temporarily disable option two.
+    //To stop the server, press two.
   } else {
     // Caller unauthorised
     twiml += `<Response>
