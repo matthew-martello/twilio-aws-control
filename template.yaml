@@ -1,0 +1,212 @@
+AWSTemplateFormatVersion: 2010-09-09
+
+Parameters:
+  ProjectId:
+    Type: String
+    Default: TWILIO_AWS_CONTROL
+    MinLength: 18
+  EC2InstanceId:
+    Type: String
+    MinLength: 3
+    AllowedPattern: "^i-[a-fA-F0-9]+$"
+    Description: Instance ID of the EC2 server to control start/stop via Twilio.
+  PhoneNoWhitelist:
+    Type: String
+    MinLength: 12 #AU mobile minimum length 12 characters: +61412345678
+    Description: Comma seperated string of E.164 compliant phone numbers.
+  TwilioVoice:
+    Type: String
+    Default: en-AU-Chirp3-HD-Charon
+    MinLength: 1
+    # https://www.twilio.com/docs/voice/twiml/say/text-speech#available-voices-and-languages
+    Description: Text to speech voice name
+
+Resources:
+  # ---------------------------------------------------------------------------
+  # API
+  # ---------------------------------------------------------------------------
+  HttpApi:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: TwilioControl
+      Description: Public HTTP API exposing endpoints for the Twilio Voice Incoming webhook.
+      ProtocolType: HTTP
+      Tags:
+        ProjectId: !Ref ProjectId
+
+  HttpApiStage:
+    Type: AWS::ApiGatewayV2::Stage
+    Properties:
+      ApiId: !Ref HttpApi
+      StageName: $default
+      AutoDeploy: true
+      Tags:
+        ProjectId: !Ref ProjectId
+
+  # ---------------------------------------------------------------------------
+  # POST /twilio/voice/incoming
+  #
+  # Add voice incoming lambda integration to API, create webhook endpoint and
+  # permissions for API gateway to call lambda function
+  # ---------------------------------------------------------------------------
+  VoiceIncomingIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref HttpApi
+      Description: Lambda proxy integration for Twilio Voice Incoming webhook.
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !GetAtt VoiceIncomingFunction.Arn
+      PayloadFormatVersion: "2.0"
+
+  VoiceIncomingRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: POST /twilio/voice/incoming
+      Target: !Sub integrations/${VoiceIncomingIntegration}
+
+  VoiceIncomingInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref VoiceIncomingFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${HttpApi}/*/POST/twilio/voice/incoming
+
+  # ---------------------------------------------------------------------------
+  # VOICE INCOMING FUNCTION
+  # Handles POST request from Twilio Voice Incoming
+  # ---------------------------------------------------------------------------
+  VoiceIncomingFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Tags:
+        - Key: ProjectId
+          Value: !Ref ProjectId
+
+  VoiceIncomingFunction:
+    Type: AWS::Lambda::Function
+    Metadata:
+      cfn-lint:
+        config:
+          ignore_checks:
+            - W3002 # Ignore 'This code may only work the 'package' cli command.
+    Properties:
+      FunctionName: TwilioVoiceIncoming
+      Description: Handles the POST request from Twilio Voice Incoming Webhook and calls the handle input function upon user interaction.
+      Runtime: nodejs22.x
+      Architectures:
+        - x86_64
+      Role: !GetAtt VoiceIncomingFunctionRole.Arn
+      Environment:
+        Variables:
+          VOICE: !Ref TwilioVoice
+          SERVER_WHITELIST: !Ref PhoneNoWhitelist
+          HANDLE_INPUT_URL: !Sub https://${HttpApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/twilio/voice/handle-input
+      Code: ./lambda/VoiceIncoming
+      Handler: index.handler
+      Tags:
+        - Key: ProjectId
+          Value: !Ref ProjectId
+
+  # ---------------------------------------------------------------------------
+  # POST /twilio/voice/handle-input
+  #
+  # Add handle input lambda integration to API, create webhook endpoint and
+  # permissions for API gateway to call lambda function
+  # ---------------------------------------------------------------------------
+  HandleInputIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref HttpApi
+      Description: Lambda proxy integration for Twilio Voice Handle Input webhook.
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !GetAtt HandleInputFunction.Arn
+      PayloadFormatVersion: "2.0"
+
+  HandleInputRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: POST /twilio/voice/handle-input
+      Target: !Sub integrations/${HandleInputIntegration}
+
+  HandleInputInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref HandleInputFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${HttpApi}/*/POST/twilio/voice/handle-input
+
+  # ---------------------------------------------------------------------------
+  # HANDLE INPUT FUNCTION
+  # Handles follow-up requests from the voice handler to handle user input.
+  # ---------------------------------------------------------------------------
+  HandleInputFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: TwilioHandleInputEc2Control
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ec2:StartInstances
+                  - ec2:StopInstances
+                Resource: !Sub arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/${EC2InstanceId}
+      Tags:
+        - Key: ProjectId
+          Value: !Ref ProjectId
+
+  HandleInputFunction:
+    Type: AWS::Lambda::Function
+    Metadata:
+      cfn-lint:
+        config:
+          ignore_checks:
+            - W3002 # Ignore 'This code may only work the 'package' cli command.
+    Properties:
+      FunctionName: TwilioHandleInput
+      Description: Handles the follow-up POST requests from twilio to handle user input from the voice call.
+      Runtime: nodejs22.x
+      Architectures:
+        - x86_64
+      Role: !GetAtt HandleInputFunctionRole.Arn
+      Environment:
+        Variables:
+          VOICE: !Ref TwilioVoice
+          SERVER_WHITELIST: !Ref PhoneNoWhitelist
+          INSTANCE_ID: !Ref EC2InstanceId
+      Code: ./lambda/HandleInput
+      Handler: index.handler
+      Tags:
+        - Key: ProjectId
+          Value: !Ref ProjectId
+
+Outputs:
+  VoiceIncomingWebhookUrl:
+    Description: Twilio Voice Incoming webhook URL.
+    Value: !Sub https://${HttpApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/twilio/voice/incoming
+  HandleInputWebhookUrl:
+    Description: Twilio Voice Handle Input webhook URL.
+    Value: !Sub https://${HttpApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/twilio/voice/handle-input
