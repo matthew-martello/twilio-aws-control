@@ -48,3 +48,17 @@ Under the **Voice Configuration** section apply the following settings:
   - _\*Copy the `VoiceIncomingWebhookUrl` value from the CloudFormation output._
 - **HTTP**
   - _HTTP POST_
+
+## Environment Variables
+
+Stack parameters are provided via `.env`. Some values are pre-defined, but can be changed to suit your preference.
+
+|    Variable Name     |     Default Value      | Description                                                                                                                                                                       |
+| :------------------: | :--------------------: | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+|     `AWS_REGION`     |                        | Region to deploy stack in.                                                                                                                                                        |
+|     `STACK_NAME`     |   twilio-aws-control   | Name of the CloudFormation Stack.                                                                                                                                                 |
+|     `PROJECT_ID`     |   TWILIO_AWS_CONTROL   | Used for tagging resources with the `ProjectId` tag.                                                                                                                              |
+|    `TWILIO_VOICE`    | en-AU-Chirp3-HD-Charon | Name of the text-to-speech voice used by Twilio. See [available languages](https://www.twilio.com/docs/voice/twiml/say/text-speech#available-voices-and-languages) for full list. |
+|   `CF_BUCKET_NAME`   |                        | S3 Bucket name to hold CloudFormation package artifacts.                                                                                                                          |
+|  `EC2_INSTANCE_ID`   |                        | EC2 Instance ID to control via Twilio                                                                                                                                             |
+| `PHONE_NO_WHITELIST` |                        | A comma seperated string of E.164 phone numbers (with no spaces).                                                                                                                 |
